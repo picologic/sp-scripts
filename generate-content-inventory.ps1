@@ -4,8 +4,10 @@
 # and subwebs
 ###################
 
-param([string]$url)
-param([string]$outfile="sitecollection-sizes.txt")
+param(
+    [string]$url,
+    [string]$outfile="content-inventory.txt"
+)
 
 if ( (Get-PSSnapin -Name "Microsoft.SharePoint.PowerShell" -ErrorAction SilentlyContinue) -eq $null )
 {
