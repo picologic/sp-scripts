@@ -14,6 +14,13 @@ if ( (Get-PSSnapin -Name "Microsoft.SharePoint.PowerShell" -ErrorAction Silently
     Add-PSSnapin "Microsoft.SharePoint.PowerShell"
 }
 
+$EXCLUDE = @(
+    '_catalogs',
+    '/Pages',
+    '/SitePages',
+    '/SiteAssets'
+);
+
 function AnalyzeWeb($web) {
     
     $records = @();
@@ -37,7 +44,7 @@ function AnalyzeWeb($web) {
         }
     }
     
-    $records += BuildRecord $web.Url $web.Title "Web" $web.Created $web.LastItemModifiedDate $web.Author "" (($records | measure-object Size -sum).Sum) $records.Length
+    $records += BuildRecord $web $web.Url $web.Title "Web" $web.Created $web.LastItemModifiedDate $web.Author "" (($records | measure-object Size -sum).Sum) $records.Length
     
     return $records;
 }
@@ -45,16 +52,20 @@ function AnalyzeWeb($web) {
 function AnalyzeDocumentLibrary($doclib) {
     $records = @();
     
+    if (($EXCLUDE | %{$doclib.RootFolder.Url.Contains($_)}) -contains $true) {
+        return $records;
+    }
+    
     $items = $doclib.GetItems();
     $items | foreach {
         if ($_.Folder -ne $null) {
             write-host "folder";
         } else {
-            $records += BuildRecord ($_.Web.Url + "/" + $_.Url) $_.Title "Document" $_["Created"] $_["Modified"] $_["Author"] $_["Editor"] $_.File.TotalLength 0
+            $records += BuildRecord $_.Web ($_.Web.Url + "/" + $_.Url) $_["FileLeafRef"] "Document" $_["Created"] $_["Modified"] $_["Author"] $_["Editor"] $_.File.TotalLength 0
         }
     }
     
-    $records += BuildRecord ($doclib.ParentWeb.Url + "/" + $doclib.RootFolder.Url) $doclib.Title "Document Library" $doclib.Created $doclib.LastItemModifiedDate "" "" (($records | measure-object Size -sum).Sum) $records.Length
+    $records += BuildRecord $doclib.ParentWeb ($doclib.ParentWeb.Url + "/" + $doclib.RootFolder.Url) $doclib.Title "Document Library" $doclib.Created $doclib.LastItemModifiedDate "" "" (($records | measure-object Size -sum).Sum) $records.Length
     
     return $records;
 }
@@ -62,30 +73,40 @@ function AnalyzeDocumentLibrary($doclib) {
 function AnalyzeList($list) {
     $records = @();
     
+    if (($EXCLUDE | %{$list.RootFolder.Url.Contains($_)}) -contains $true) {
+        return $records;
+    }
+    
     $items = $list.GetItems();
     $items | foreach {
         if ($_.Folder -ne $null) {
             write-host "folder";
         } else {
-            $records += BuildRecord ($_.Web.Url + "/" + $_.Url) $_.Title "Item" $_["Created"] $_["Modified"] $_["Author"] $_["Editor"] 0 0
+            $records += BuildRecord $_.Web ($_.Web.Url + "/" + $_.Url) $_.Title "Item" $_["Created"] $_["Modified"] $_["Author"] $_["Editor"] 0 0
         }
     }
     
-    $records += BuildRecord ($list.ParentWeb.Url + "/" + $list.RootFolder.Url) $list.Title "List" $list.Created $list.LastItemModifiedDate "" "" (($records | measure-object Size -sum).Sum) $records.Length
+    $records += BuildRecord $list.ParentWeb ($list.ParentWeb.Url + "/" + $list.RootFolder.Url) $list.Title "List" $list.Created $list.LastItemModifiedDate "" "" (($records | measure-object Size -sum).Sum) $records.Length
 
     return $records;
 }
 
 function WriteOutput($records, $outfile) {
-    "Url`tName`tType`tExtension`tCreated`tLastModified`tCreatedBy`tModifiedBy`tSize`tChildren`n" | out-file -filepath $outfile -encoding ASCII
+    "Site`tWeb`tContainer`tUrl`tName`tType`tExtension`tCreated`tLastModified`tCreatedBy`tModifiedBy`tSize`tChildren`n" | out-file -filepath $outfile -encoding ASCII
     $records | foreach {
-        "$($_.Url)`t$($_.Name)`t$($_.Type)`t$($_.Extension)`t$($_.Created)`t$($_.LastModified)`t$($_.CreatedBy)`t$($_.ModifiedBy)`t$($_.Size)`t$($_.Children)`n" | out-file -filepath $outfile -encoding ASCII -append
+        "$($_.Site)`t$($_.Web)`t$($_.Container)`t$($_.Url)`t$($_.Name)`t$($_.Type)`t$($_.Extension)`t$($_.Created)`t$($_.LastModified)`t$($_.CreatedBy)`t$($_.ModifiedBy)`t$($_.Size)`t$($_.Children)`n" | out-file -filepath $outfile -encoding ASCII -append
     }
 }
 
-function BuildRecord($url, $name, $type, $created, $lastmod, $createdby, $modby, $size, $children) {
+function BuildRecord($web, $url, $name, $type, $created, $lastmod, $createdby, $modby, $size, $children) {
+    $siteurl = $web.Site.Url
+    $weburl = $web.Url
+    $container = $url.Substring(0, $url.LastIndexOf('/'))
     $ext = [System.IO.Path]::GetExtension($url).Trim('.')
     return New-Object psobject -Property @{ 
+        Site = $siteurl;
+        Web = $weburl;
+        Container = $container;
         Url = $url; 
         Name = $name;
         Type = $type;
@@ -95,7 +116,7 @@ function BuildRecord($url, $name, $type, $created, $lastmod, $createdby, $modby,
         CreatedBy = (FriendlyUserName $createdby);
         ModifiedBy = (FriendlyUserName $modby);
         Size = $size;
-        Children = $children 
+        Children = $children;
     };
 }
 
